@@ -24,6 +24,6 @@ endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-add_executable(st-rans Streaming_rANS.cpp)
+add_executable(st-rans Streaming_rANS.cpp rANS_codec.cpp)
 add_executable(bs-test bs_test.cpp)
 #add_executable(rans rANS.cpp)

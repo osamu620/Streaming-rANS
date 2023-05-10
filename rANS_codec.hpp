@@ -4,97 +4,58 @@
 #include <cstdint>
 #include "BitStream.hpp"
 
-#define LOW_LEVEL 2
-#define RANGE_FACTOR 8
+#define RANS_L 1ull << 31
+constexpr uint32_t prob_bits  = 14;
+constexpr uint32_t prob_scale = 1 << prob_bits;
 
-class St_rANSencoder {
- private:
-  size_t total_counts;
-  std::vector<size_t> cum_freqs;
-  std::vector<uint32_t> freqs;
-  int x;  // state
-  int range_factor;
+static inline uint64_t Rans64MulHi(uint64_t a, uint64_t b) {
+  return (uint64_t)(((unsigned __int128)a * b) >> 64);
+}
 
- public:
-  BitStream bse;
-  St_rANSencoder(std::vector<uint32_t> &symbol_counts)
-      : total_counts(0),
-        cum_freqs((symbol_counts.size() + 1)),
-        freqs(symbol_counts),
-        range_factor(RANGE_FACTOR),
-        bse() {
-    total_counts = std::reduce(symbol_counts.begin(), symbol_counts.end());
-    // calculate total counts, M
-    // for (int i = 0; i < symbol_counts.size(); i++) {
-    //   total_counts += symbol_counts[i];
-    // }
-    x = LOW_LEVEL * total_counts;
-
-    cum_freqs[0] = 0;
-    // calculate cumulative sum, C
-    // for (int i = 1; i < symbol_counts.size() + 1; i++) {
-    //   cumul_counts[i] = cumul_counts[i - 1] + symbol_counts[i - 1];
-    // }
-    std::partial_sum(symbol_counts.begin(), symbol_counts.end(), cum_freqs.begin() + 1,
-                     std::plus<size_t>());
-    // normalize_freqs();
-  }
-  void encode_symbol(uint16_t s) {
-    // Output bits to the stream to bring the state in the range for the next encoding
-    while (x >= range_factor * freqs[s]) {
-      bse.put_bit(x % 2);
-      // printf("%d", state % 2);
-      x >>= 1;
-    }
-    rANSencode(s);  // The rANS encoding step
-  }
-
-  void rANSencode(int s) { x = (x / freqs[s]) * total_counts + cum_freqs[s] + (x % freqs[s]); }
-
-  int get_state() { return x; }
+// Encoder symbol description
+// This (admittedly odd) selection of parameters was chosen to make
+// RansEncPutSymbol as cheap as possible.
+struct enc_symbol_info {
+  uint64_t rcp_freq;   // Fixed-point reciprocal frequency
+  uint32_t freq;       // Symbol frequency
+  uint32_t bias;       // Bias
+  uint32_t cmpl_freq;  // Complement of frequency: (1 << scale_bits) - freq
+  uint32_t rcp_shift;  // Reciprocal shift
 };
 
-class St_rANSdecoder {
- private:
-  size_t total_counts;
-  std::vector<size_t> cum_freqs;
+// Decoder symbols are straightforward.
+struct dec_symbol_info {
+  uint32_t start;  // Start of range.
+  uint32_t freq;   // Symbol frequency.
+};
+
+struct symbol_stats {
   std::vector<uint32_t> freqs;
-  int x;  // state
-  int range_factor;
+  std::vector<uint32_t> cum_freqs;
+  symbol_stats() noexcept;
+  void count_freqs(std::vector<uint16_t> &);
+  void calc_cum_freqs();
+  void normalize_freqs();
+};
+
+class rANSencoder {
+  uint64_t state;
+  enc_symbol_info esyms[256];
 
  public:
-  BitStream bsd;
-  St_rANSdecoder(int st, std::vector<uint32_t> &symbol_counts, uint8_t *p, size_t psize, size_t plen)
-      : total_counts(0),
-        cum_freqs((symbol_counts.size() + 1)),
-        freqs(symbol_counts),
-        x(st),
-        range_factor(RANGE_FACTOR >> 1),
-        bsd(p, psize, plen) {
-    // calculate total counts, M
-    total_counts = std::reduce(symbol_counts.begin(), symbol_counts.end());
-    cum_freqs[0] = 0;
-    // calculate cumulative sum, C
-    std::partial_sum(symbol_counts.begin(), symbol_counts.end(), cum_freqs.begin() + 1,
-                     std::plus<size_t>());
-  }
-  int decode_symbol() {
-    // perform the non-streaming rANS decoding
-    int slot = x % total_counts;
-    int s    = 0;
-    for (int i = 0; i < cum_freqs.size(); ++i) {
-      if (slot < cum_freqs[i]) {
-        s = i - 1;
-        break;
-      }
-    }
-    x = (x / total_counts) * freqs[s] + slot - cum_freqs[s];
+  std::vector<uint32_t> outbytes;
+  rANSencoder(symbol_stats &);
+  void encode_symbol(int);
+  size_t flush();
+};
 
-    // remap the state into the acceptable range
-    while (x < range_factor * total_counts) {
-      x <<= 1;
-      x += bsd.get_bit();
-    }
-    return s;
-  }
+class rANSdecoder {
+  uint64_t state;
+  dec_symbol_info dsyms[256];
+  uint32_t *codestream;
+  size_t pos;
+
+ public:
+  rANSdecoder(std::vector<uint32_t> &, symbol_stats &);
+  uint32_t decode_symbol(uint8_t *);
 };

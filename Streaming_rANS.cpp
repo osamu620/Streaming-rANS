@@ -1,39 +1,8 @@
 #include <cstdio>
 #include "rANS_codec.hpp"
 
-template <class T>
-void show_data(std::vector<T> &data) {
-  for (auto &e : data) {
-    printf("%d ", e);
-  }
-  printf("\n");
-}
-
-void show_bitstream(std::vector<uint8_t> c) {
-  for (int i = 0; i < c.size() - 2; ++i) {
-    uint8_t tmp = c[i];
-    for (int j = 7; j >= 0; --j) {
-      printf("%d", (tmp & (1 << j)) >> j);
-    }
-  }
-  if (c[c.size() - 1]) {
-    uint8_t tmp = c[c.size() - 2];
-    for (int j = 7; j >= c[c.size() - 1]; --j) {
-      printf("%d", (tmp & (1 << j)) >> j);
-    }
-  }
-  printf("\n");
-}
-
 int main() {
-  // std::vector<uint32_t> F     = {2, 8, 2, 4};
-  // std::vector<uint16_t> input = {2, 1, 1, 1, 3, 1, 1, 3, 0, 3, 3, 2, 1, 0, 1, 1};
-  // std::vector<uint32_t> F = {95389, 246718, 207649, 83034, 42560, 21342, 6907, 2256,
-  //                            57,    53,     19,     6,     1,     2,     0,    7};
-  // FILE *fp                = fopen("real-low-nonminus1.raw", "rb");
-  // std::vector<uint32_t> F = {191170, 493375, 415324, 165407, 85284, 42871, 13727, 4544,
-  //                            128,    96,     43,     18,     2,     2,     0,     9};
-  FILE *fp = fopen("ri-interleaved-low-nonminus1.raw", "rb");
+  FILE *fp = fopen("../../ri-interleaved-low-nonminus1.raw", "rb");
   std::vector<uint16_t> input;
 
   int d;
@@ -43,30 +12,36 @@ int main() {
     freqs[d]++;
   }
 
-  St_rANSencoder enc(freqs);
-  for (auto &s : input) {
-    enc.encode_symbol(s);
-  }
-  std::vector<uint8_t> codestream;
-  enc.bse.flush(codestream);
-  const size_t cs_size = codestream.size() - 1;  // exclude last byte (length info)
+  symbol_stats stats;
+  stats.count_freqs(input);
+  stats.calc_cum_freqs();
+  stats.normalize_freqs();
+  // cumlative->symbol table
+  // this is super brute force
+  uint8_t cum2sym[prob_scale];
+  for (int s = 0; s < 256; s++)
+    for (uint32_t i = stats.cum_freqs[s]; i < stats.cum_freqs[s + 1]; i++) cum2sym[i] = s;
 
-  size_t numbits = 8 * (cs_size)-codestream[cs_size];
-  printf("\nCompressed bitstream (%lu bits, %f bpp):\n", numbits, (double)numbits / (4096 * 4096));
-
-  St_rANSdecoder dec(enc.get_state(), freqs, &codestream[0], cs_size, codestream[cs_size]);
-  std::vector<uint16_t> rec(input.size());
+  rANSencoder enc(stats);
   for (int i = 0; i < input.size(); ++i) {
-    rec[rec.size() - 1 - i] = dec.decode_symbol();
+    enc.encode_symbol(input[input.size() - i - 1]);
   }
+  size_t num_bytes = enc.flush();
 
+  std::vector<uint16_t> rec;
+  rANSdecoder dec(enc.outbytes, stats);
+  for (int i = 0; i < input.size(); ++i) {
+    uint32_t s = dec.decode_symbol(cum2sym);
+    rec.push_back((std::uint16_t)s);
+  }
   // Verification
-  for (int i = 0; i < rec.size(); ++i) {
+  for (size_t i = 0; i < rec.size(); ++i) {
     if (input[i] != rec[i]) {
       printf("ERROR!\n");
       return EXIT_FAILURE;
     }
   }
-  printf("\nInput data are perfectly decoded.\n");
+  printf("Codestream bytes = %zu\nbpp = %f\nInput data are perfectly decoded.\n", num_bytes,
+         (float)num_bytes * 8 / (4096 * 4096));
   return EXIT_SUCCESS;
 }
