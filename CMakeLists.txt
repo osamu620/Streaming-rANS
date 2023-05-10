@@ -18,12 +18,12 @@ endif()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
 	set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -O0 -g")
-	set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O2")
+	set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O3")
 	set(CMAKE_CXX_FLAGS_RelWithDebInfo "${CMAKE_CXX_FLAGS} -O2 -g")
 endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-add_executable(st-rans Streaming_rANS.cpp rANS_codec.cpp)
+add_executable(st-rans Streaming_rANS.cpp BitStream.cpp)
 add_executable(bs-test bs_test.cpp)
 #add_executable(rans rANS.cpp)
