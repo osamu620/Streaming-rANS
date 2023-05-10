@@ -4,6 +4,10 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <limits>
+#include <algorithm>
+#include <climits>
+#include <cassert>
 
 // Reflection on MarkerByte data
 #define EXPAND(...) __VA_ARGS__
