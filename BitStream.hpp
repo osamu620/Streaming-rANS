@@ -124,6 +124,9 @@ class BitstreamEncoder : protected BitstreamObject {
   // commit tail, update states
   void commit_buffer();
 
+  // commit tail, no byte swap update states
+  void commit_buffer_noswap();
+
   // shift word within tail
   void doubleshiftleft(internaltype word, int bitcount);
 
@@ -166,6 +169,9 @@ class BitstreamEncoder : protected BitstreamObject {
   // Write a word (only push 'bitcount' LSB of 'word' to bit stream)
   void write_word(internaltype word, int bitcount);
 
+  // Write a word (only push 'bitcount' LSB of 'word' to bit stream), no-byteswap
+  void write_word_noswap(internaltype word, int bitcount);
+
   // Push an Exponential-Golomb-coded integer (32-bit), except for UINT_MAX
   void write_exp_golomb(uint32_t x);
 
@@ -178,7 +184,7 @@ class BitstreamEncoder : protected BitstreamObject {
   // Termination
   // Pads to nearest byte with zeros, pushes word to stream, returns length in bytes
   size_t terminate_stream();
-
+  size_t terminate_stream_noswap();  // no-byteswap
   // Access data as bytes
   inline auto access_data() const { return (const std::byte*)stream.data(); }
 
@@ -201,10 +207,28 @@ class BitstreamDecoder : protected BitstreamObject {
       return 0;
     }
   }
+  // peek next element without byte swap
+  inline btype peek_next_noswap() {
+    if (source) {
+      // if(nbits_valid_remaining > packedUnitBit)
+      return *source;
+    } else {
+      return 0;
+    }
+  }
 
   // read next element
   inline void read_next() {
     tail = peek_next();
+    if (remaining > -1)
+      source++;
+    else
+      source = NULL;
+  }
+
+  // read next element without byte swap
+  inline void read_next_noswap() {
+    tail = peek_next_noswap();
     if (remaining > -1)
       source++;
     else
@@ -268,6 +292,35 @@ class BitstreamDecoder : protected BitstreamObject {
     return result;
   }
 
+  // read general word without byte swap
+  template <typename T>
+  T read_word_noswap(int bitcount) {
+    nbits_valid_remaining -= bitcount;
+    assert(nbits_valid_remaining > -1);
+
+    assert(bitcount > 0 && bitcount <= packedUnitBit);
+    if (remaining == 0) {
+      read_next_noswap();
+      remaining = packedUnitBit;
+    }
+
+    T result = (T)tail >> (packedUnitBit - bitcount);
+    if (bitcount > remaining) {
+      bitcount -= remaining;
+      remaining = packedUnitBit - bitcount;
+      read_next_noswap();
+      result |= tail >> remaining;
+    } else
+      remaining -= bitcount;
+
+    assert(bitcount < 65);
+    if (bitcount > 64)
+      throw std::runtime_error("BitstreamDecoder::read_word: Too many bits " + std::to_string(bitcount)
+                               + " > 64 remaining in internal statistics.");
+    if (bitcount < 64) tail <<= bitcount;
+    return result;
+  }
+
  public:
   const internaltype* source;
   int64_t nbits_valid_remaining;  // TODO: Properly implement checking to avoid illegal memory access here
@@ -309,6 +362,11 @@ class BitstreamDecoder : protected BitstreamObject {
 
   // Read an unsigned word made of 'bitcount' bits
   inline internaltype read_unsigned_word(int bitcount) { return read_word<internaltype>(bitcount); };
+
+  // Read an unsigned word made of 'bitcount' bits without byte swap
+  inline internaltype read_unsigned_word_noswap(int bitcount) {
+    return read_word_noswap<internaltype>(bitcount);
+  };
 
   // Read a signed word made of 'bitcount' bits
   inline signedinternaltype read_signed_word(int bitcount) {
@@ -353,7 +411,7 @@ class BitstreamDecoder : protected BitstreamObject {
 //     tmp = static_cast<uint8_t>(tmp + (b << bits));
 //   }
 //
-//   void flush(std::vector<uint8_t> &out) {
+//   void DoneEncoding(std::vector<uint8_t> &out) {
 //     if (bits > 0) {
 //       buf.push_back(tmp);
 //       pos++;

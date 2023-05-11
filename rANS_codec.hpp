@@ -13,7 +13,7 @@
 #endif
 
 #define RANS_L 1ull << 31
-constexpr uint32_t prob_bits  = 12;
+constexpr uint32_t prob_bits  = 14;
 constexpr uint32_t prob_scale = 1 << prob_bits;
 constexpr uint64_t mask       = (1ull << prob_bits) - 1;
 
@@ -49,26 +49,26 @@ struct symbol_stats {
   void normalize_freqs();
 };
 
-class rANSencoder {
+class rANSEncode {
   uint64_t state;
   enc_symbol_info esyms[256];
 
  public:
   std::vector<uint32_t> outbytes;
-  rANSencoder(symbol_stats &);
-  void encode_symbol(int);
-  size_t flush();
+  rANSEncode(symbol_stats &);
+  void EncodeSymbol(BitstreamEncoder &, int);
+  size_t DoneEncoding(BitstreamEncoder &);
 };
 
-class rANSdecoder {
+class rANSDecode {
   uint64_t state;
   dec_symbol_info dsyms[256];
   uint32_t *codestream;
   size_t pos;
 
  public:
-  rANSdecoder(std::vector<uint32_t> &, symbol_stats &);
-  uint32_t decode_symbol(uint8_t *);
+  rANSDecode(std::vector<uint32_t> &, symbol_stats &);
+  uint32_t DecodeSymbol(uint8_t *cum2sym);
 };
 
 symbol_stats::symbol_stats() noexcept : freqs(256, 0), cum_freqs(257, 0) {}
@@ -137,7 +137,7 @@ void symbol_stats::normalize_freqs() {
   }
 }
 
-rANSencoder::rANSencoder(symbol_stats &stats) {
+rANSEncode::rANSEncode(symbol_stats &stats) {
   state = RANS_L;
   enc_symbol_info *s;
   uint32_t start, freq;
@@ -224,7 +224,7 @@ rANSencoder::rANSencoder(symbol_stats &stats) {
   }
 }
 
-FORCE_INLINE void rANSencoder::encode_symbol(int s) {
+FORCE_INLINE void rANSEncode::EncodeSymbol(BitstreamEncoder &bse, int s) {
   enc_symbol_info *sym = &esyms[s];
   assert(sym->freq != 0);  // can't encode symbol with freq=0
 
@@ -232,6 +232,8 @@ FORCE_INLINE void rANSencoder::encode_symbol(int s) {
   uint64_t x     = state;
   uint64_t x_max = (((RANS_L) >> prob_bits) << 32) * sym->freq;  // turns into a shift
   if (x >= x_max) {
+    bse.write_word_noswap(x, 32);
+    //    bse.write_word(x, 32);
     outbytes.push_back((uint32_t)x);
     x >>= 32;
   }
@@ -242,16 +244,21 @@ FORCE_INLINE void rANSencoder::encode_symbol(int s) {
 }
 
 // Flushes the rANS encoder.
-size_t rANSencoder::flush() {
+size_t rANSEncode::DoneEncoding(BitstreamEncoder &bse) {
   uint64_t x = state;
+  bse.write_word_noswap(x, 32);
+  bse.write_word_noswap(x >> 32, 32);
+  //  bse.write_word(x >> 32, 32);
+  //  bse.write_word(x, 32);
 
+  size_t num_bytes = bse.bytesize_oracle();
   outbytes.push_back((uint32_t)(x >> 0));
   outbytes.push_back((uint32_t)(x >> 32));
-  size_t num_bytes = outbytes.size() * 4;
+  //  size_t num_bytes = outbytes.size() * 4;
   return num_bytes;
 }
 
-rANSdecoder::rANSdecoder(std::vector<uint32_t> &c, symbol_stats &stats) : pos(c.size() - 1) {
+rANSDecode::rANSDecode(std::vector<uint32_t> &c, symbol_stats &stats) : pos(c.size() - 1) {
   codestream = &c[0];
   state      = (uint64_t)(codestream[pos]) << 32;
   state |= (uint64_t)(codestream[pos - 1]) << 0;
@@ -270,7 +277,7 @@ rANSdecoder::rANSdecoder(std::vector<uint32_t> &c, symbol_stats &stats) : pos(c.
   }
 }
 // Returns the current cumulative frequency (map it to a symbol yourself!)
-FORCE_INLINE uint32_t rANSdecoder::decode_symbol(uint8_t *cum2sym) {
+FORCE_INLINE uint32_t rANSDecode::DecodeSymbol(uint8_t *cum2sym) {
   uint32_t s = cum2sym[state & ((1u << prob_bits) - 1)];
 
   // s, x = D(x)

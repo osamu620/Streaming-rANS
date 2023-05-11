@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.13)
-project (TEST LANGUAGES CXX DESCRIPTION "Streaming rANS")
+project (rANS LANGUAGES CXX DESCRIPTION "Streaming rANS")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -25,5 +25,5 @@ endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 add_executable(st-rans Streaming_rANS.cpp BitStream.cpp)
-#add_executable(bs-test bs_test.cpp)
+add_executable(bs-test bs_test.cpp BitStream.cpp)
 #add_executable(rans rANS.cpp)

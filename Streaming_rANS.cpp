@@ -24,25 +24,43 @@ int main() {
     for (uint32_t i = stats.cum_freqs[s]; i < stats.cum_freqs[s + 1]; i++) cum2sym[i] = s;
 
   // Encoding
-  rANSencoder enc(stats);
+  BitstreamEncoder bse;
+  rANSEncode enc(stats);
   auto fstart = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < input.size(); ++i) {
-    enc.encode_symbol(input[input.size() - i - 1]);
+    enc.EncodeSymbol(bse, input[input.size() - i - 1]);  //
   }
-  size_t num_bytes = enc.flush();
-  auto fduration   = std::chrono::high_resolution_clock::now() - fstart;
-  auto fcount      = std::chrono::duration_cast<std::chrono::microseconds>(fduration).count();
-  double ftime     = static_cast<double>(fcount) / 1000.0;
+  size_t num_bytes = enc.DoneEncoding(bse);
+  bse.terminate_stream_noswap();
+  auto fduration = std::chrono::high_resolution_clock::now() - fstart;
+  auto fcount    = std::chrono::duration_cast<std::chrono::microseconds>(fduration).count();
+  double ftime   = static_cast<double>(fcount) / 1000.0;
   printf("Encoding time %-6.4lf[ms], ", ftime);
   printf("%f [MB/s]\n", (double)num_bytes / ftime / 1000);
 
+  // Transfer bse.stream (uint64_t) to codestream_bytes (uint32_t)
+  std::vector<uint32_t> compressed_bytes;
+  for (int i = 0; i < num_bytes / 8; ++i) {
+    compressed_bytes.push_back((uint32_t)(bse.stream[i] >> 32));
+    compressed_bytes.push_back((uint32_t)(bse.stream[i] & 0x00000000FFFFFFFF));
+  }
+  if (num_bytes % 8) {
+    compressed_bytes.push_back((uint32_t)(bse.stream[bse.stream.size() - 1] >> 32));
+  }
+  for (int i = 0; i < enc.outbytes.size(); ++i) {
+    if (enc.outbytes[i] != compressed_bytes[i]) {
+      printf("[%d] %d -> %d\n", i, enc.outbytes[i], compressed_bytes[i]);
+    }
+  }
   // Decoding
+  BitstreamDecoder bsd(&bse.stream[0], num_bytes);
+  uint64_t xxx = bsd.read_unsigned_word_noswap(32);
   std::vector<uint16_t> rec;
   rec.reserve(input.size());
-  rANSdecoder dec(enc.outbytes, stats);
+  rANSDecode dec(compressed_bytes, stats);
   fstart = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < input.size(); ++i) {
-    uint32_t s = dec.decode_symbol(cum2sym);
+    uint32_t s = dec.DecodeSymbol(cum2sym);
     rec.push_back((std::uint16_t)s);
   }
   fduration = std::chrono::high_resolution_clock::now() - fstart;
