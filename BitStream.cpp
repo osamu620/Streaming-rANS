@@ -49,12 +49,6 @@ void BitstreamEncoder::commit_buffer() {
   remaining = packedUnitBit;
 }
 
-void BitstreamEncoder::commit_buffer_noswap() {
-  stream.push_back(tail);
-  tail      = 0;
-  remaining = packedUnitBit;
-}
-
 void BitstreamEncoder::doubleshiftleft(internaltype word, int bitcount) {
   static_assert(std::is_same_v<uint64_t, internaltype>);
   tail = shiftleft128(word, tail, bitcount);
@@ -122,26 +116,6 @@ void BitstreamEncoder::write_word(internaltype word, int bitcount) {
   doubleshiftleft(word, bitcount);
 }
 
-void BitstreamEncoder::write_word_noswap(BitstreamProps::internaltype word, int bitcount) {
-  assert(packedUnitBit >= bitcount);
-  // push relevant bits up to MSB
-  word <<= (internaltype)packedUnitBit - bitcount;
-
-  // if word doesn't fit in tail
-  if (bitcount >= remaining) {
-    doubleshiftleft(word, remaining);
-
-    bitcount -= remaining;
-    word <<= remaining;
-    commit_buffer_noswap();
-  }
-
-  // push remaining bits
-  if (bitcount <= 0) return;
-  remaining -= bitcount;
-  doubleshiftleft(word, bitcount);
-}
-
 void BitstreamEncoder::write_exp_golomb(uint32_t x) {
   assert(x != std::numeric_limits<uint32_t>::max());
   // push number with (xcount-1) preceding zeros
@@ -185,20 +159,10 @@ size_t BitstreamEncoder::terminate_stream() {
   if (remaining > 64)
     throw std::runtime_error("BitstreamEncoder::terminate_stream: Too many bits "
                              + std::to_string(remaining) + " > 64 remaining in internal statistics.");
-  if (remaining < 64) tail <<= remaining;
-  commit_buffer();
-  return bytelength;
-}
-
-size_t BitstreamEncoder::terminate_stream_noswap() {
-  const size_t bytelength = bytesize_oracle();
-  // If no bits remain in tail tail will stay 0 --> commit_buffer will be NOOP
-  assert(remaining < 65);
-  if (remaining > 64)
-    throw std::runtime_error("BitstreamEncoder::terminate_stream: Too many bits "
-                             + std::to_string(remaining) + " > 64 remaining in internal statistics.");
-  if (remaining < 64) tail <<= remaining;
-  commit_buffer_noswap();
+  if (remaining < 64) {
+    tail <<= remaining;
+    commit_buffer();
+  }
   return bytelength;
 }
 
