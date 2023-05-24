@@ -13,9 +13,9 @@
 #endif
 
 enum class ANS : uint64_t {
-  MaxDepth  = (1 << 16),
+  MaxDepth  = (1 << 14),
   RANS_L    = 1ull << 31,
-  ProbBits  = 16,
+  ProbBits  = 14,
   ProbScale = 1 << ProbBits,
   Mask      = (1ull << ProbBits) - 1
 };
@@ -258,10 +258,23 @@ size_t rANSEncode::DoneEncoding(BitstreamEncoder &bse) {
 }
 
 rANSDecode::rANSDecode(BitstreamDecoder &bsd, SymbolStats &stats) : remaining(2), tmp(0) {
-  tmp   = bsd.read_unsigned_word(64);
-  state = tmp;
-  tmp >>= 64;
-  remaining -= 2;
+  tmp = bsd.read_unsigned_word(64);
+  uint64_t upper, lower;
+  if (!(tmp & 0xFFFFFFFF)) {
+    tmp >>= 32;
+    upper = lower = bsd.read_unsigned_word(64);
+    upper >>= 32;
+    lower &= 0xFFFFFFFF;
+    tmp |= lower << 32;
+    state = tmp;
+    tmp   = upper;
+    remaining--;
+    bsd.nbits_valid_remaining += 32;
+  } else {
+    state = tmp;
+    tmp   = 0;
+    remaining -= 2;
+  }
 
   DecSymbolInfo *s;
   uint32_t start, freq;
@@ -285,14 +298,24 @@ FORCE_INLINE uint32_t rANSDecode::DecodeSymbol(BitstreamDecoder &bsd, uint8_t *c
       - dsyms[s].start;
 
   // read bitstream, if any
-  if (remaining == 0 && bsd.nbits_valid_remaining > 0) {
-    tmp       = bsd.read_unsigned_word(64);
-    remaining = 2;
+  if (remaining == 0) {
+    if (bsd.nbits_valid_remaining > 0) {
+      tmp = bsd.read_unsigned_word(32);
+      remaining++;
+      if (bsd.nbits_valid_remaining > 0) {
+        tmp <<= 32;
+        tmp |= bsd.read_unsigned_word(32);
+        remaining++;
+      }
+    }
   }
+
   // renormalize
   if (x < static_cast<uint64_t>(ANS::RANS_L)) {
     x = (x << 32) | (tmp & 0xFFFFFFFF);
-    tmp >>= 32;
+    if (tmp >> 32) {
+      tmp >>= 32;
+    }
     remaining--;
     assert(x >= static_cast<uint64_t>(ANS::RANS_L));
   }

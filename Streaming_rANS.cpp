@@ -13,7 +13,7 @@ int main() {
   FILE *fp = fopen("../../ri-interleaved-low-nonminus1.raw", "rb");
   //  FILE *fp = fopen("../../xmax.raw", "rb");
   fseek(fp, 0, SEEK_END);
-  const size_t length = ftell(fp);
+  const size_t length = ftell(fp) / 20000;
   fseek(fp, 0, SEEK_SET);
 
   auto input_data   = std::make_unique<int16_t[]>(length);
@@ -63,7 +63,7 @@ int main() {
   // Verification
   for (size_t i = 0; i < length; ++i) {
     if (input_data[i] != decoded_data[i]) {
-      printf("ERROR!\n");
+      printf("ERROR at [%d]\n", i);
       return EXIT_FAILURE;
     }
   }
